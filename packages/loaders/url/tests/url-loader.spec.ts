@@ -102,7 +102,7 @@ input TestInput {
   const testPathChecker = (path: string) => path.startsWith(testPath);
   const testUrl = `${testHost}${testPath}`;
 
-  function assertNonMaybe<T>(input: T): asserts input is Exclude<T, null | undefined>{
+  function assertNonMaybe<T>(input: T): asserts input is Exclude<T, null | undefined> {
     if (input == null) {
       throw new Error("Value should be neither null nor undefined.")
     }
@@ -429,6 +429,48 @@ input TestInput {
         subscriptionServer.close();
         httpServer.close(done);
       });
+    });
+    it('should handle subscriptions - SSE', async () => {
+      scope = mockGraphQLServer({ schema: testSchema, host: testHost, path: testPathChecker, method: 'POST' });
+
+      const [{ schema }] = await loader.load(testUrl, {
+        subscriptionsProtocol: SubscriptionProtocol.SSE
+      });
+
+      scope.done();
+
+      scope = mockGraphQLServer({ schema: testSchema, host: testHost, path: testPathChecker, method: 'GET' })
+
+      assertNonMaybe(schema)
+      const asyncIterator = await subscribe({
+        schema,
+        document: parse(/* GraphQL */`
+          subscription TestMessage {
+            testMessage {
+              number
+            }
+          }
+        `),
+        contextValue: {},
+      }) as AsyncIterableIterator<ExecutionResult>;
+
+      expect(asyncIterator['errors']).toBeFalsy();
+      expect(asyncIterator['errors']?.length).toBeFalsy();
+
+
+      // eslint-disable-next-line no-inner-declarations
+      async function getNextResult() {
+        const result = await asyncIterator.next();
+        console.log(result?.value?.errors)
+        expect(result?.done).toBeFalsy();
+        return result?.value?.data?.testMessage?.number;
+      }
+
+      expect(await getNextResult()).toBe(0);
+      expect(await getNextResult()).toBe(1);
+      expect(await getNextResult()).toBe(2);
+
+      await asyncIterator.return!();
     });
     it('should handle multipart requests', async () => {
       scope = mockGraphQLServer({ schema: testSchema, host: testHost, path: testPathChecker, method: 'POST' });

@@ -8,6 +8,8 @@ import { getGraphQLParameters, processRequest as processGraphQLHelixRequest } fr
 import { processRequest as processGraphQLUploadRequest } from 'graphql-upload';
 import { Request as MockReq } from 'mock-http';
 import { jest } from '@jest/globals';
+import spigot from 'stream-spigot';
+import { Readable } from 'stream';
 
 export function normalizeString(str: string) {
   return str.replace(/[\s,]+/g, ' ').trim();
@@ -145,9 +147,30 @@ export function mockGraphQLServer({
       const headers = new Map<string, string>();
       // We set the provided status and headers and just the send the payload back to the client
       result.headers.forEach(({ name, value }) => headers.set(name, value));
-      return [result.status, result.payload, headers];
+      return [result.status, result.payload, headers] as const;
+    } else if (result.type === 'PUSH') {
+      // If the request is closed by the client, we unsubscribe and stop executing the request
+      this.req.on('close', () => {
+        result.unsubscribe();
+      });
+      return [
+        200,
+        spigot({ objectMode: true }, function (this: Readable) {
+          result.subscribe(chunk => {
+            if (!this.push(`data: ${JSON.stringify(chunk)}\n\n`)) {
+              result.unsubscribe();
+            }
+          });
+        }) as Readable,
+        // Indicate we're sending an event stream to the client
+        new Map([
+          ['Content-Type', 'text/event-stream'],
+          ['Connection', 'keep-alive'],
+          ['Cache-Control', 'no-cache'],
+        ]),
+      ] as const;
     } else {
-      return [500, 'Not implemented'];
+      return [500, 'Not implemented'] as const;
     }
   };
   switch (method) {
