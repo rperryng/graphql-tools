@@ -81,6 +81,16 @@ describe('GraphQLFileLoader', () => {
           }
         `)
       });
+
+      it('should raise an error when the #import points to a bad path', async () => {
+        const result = load(getPointer('type-defs-with-failing-import.graphql'), {});
+        await expect(result).rejects.toThrow();
+      });
+
+      it('should raise an error when the pointer points to multiple files with some valid and some invalid type definitions', async () => {
+        const [result] = await load(getPointer('with*import.graphql'), {});
+        await expect(result).rejects.toThrow();
+      });
     });
   });
 });
