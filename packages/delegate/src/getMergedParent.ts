@@ -13,7 +13,7 @@ import {
 
 import DataLoader from 'dataloader';
 
-import { Maybe, collectFields, relocatedError, memoize1of2, memoize3, memoize4ofMany } from '@graphql-tools/utils';
+import { Maybe, collectFields, relocatedError, memoize1, memoize3, memoize4ofMany } from '@graphql-tools/utils';
 
 import { ExternalObject, MergedTypeInfo, StitchingInfo } from './types';
 import { Subschema } from './Subschema';
@@ -26,15 +26,10 @@ import {
   isExternalObject,
 } from './externalObjects';
 
-const getMergeDetails = memoize1of2(function getMergeDetails(
-  info: GraphQLResolveInfo,
-  parent: ExternalObject
-):
+const getMergeDetails = memoize1(function getMergeDetails(info: GraphQLResolveInfo):
   | {
       stitchingInfo: StitchingInfo;
       mergedTypeInfo: MergedTypeInfo;
-      sourceSubschema: Subschema;
-      targetSubschemas: Array<Subschema>;
     }
   | undefined {
   const schema = info.schema;
@@ -49,18 +44,9 @@ const getMergeDetails = memoize1of2(function getMergeDetails(
     return;
   }
 
-  // In the stitching context, all subschemas are compiled Subschema objects rather than SubschemaConfig objects
-  const sourceSubschema = getObjectSubchema(parent) as Subschema;
-  const targetSubschemas = mergedTypeInfo.targetSubschemas.get(sourceSubschema);
-  if (targetSubschemas === undefined || targetSubschemas.length === 0) {
-    return;
-  }
-
   return {
     stitchingInfo,
     mergedTypeInfo,
-    sourceSubschema,
-    targetSubschemas,
   };
 });
 
@@ -71,9 +57,25 @@ export async function getMergedParent(
   context: Record<string, any>,
   info: GraphQLResolveInfo
 ): Promise<ExternalObject> {
+  const mergeDetails = getMergeDetails(info);
+  if (!mergeDetails) {
+    return parent;
+  }
+
+  const { mergedTypeInfo } = mergeDetails;
+
+  // In the stitching context, all subschemas are compiled Subschema objects rather than SubschemaConfig objects
+  const sourceSubschema = getObjectSubchema(parent) as Subschema;
+  const targetSubschemas = mergedTypeInfo.targetSubschemas.get(sourceSubschema);
+  if (targetSubschemas === undefined || targetSubschemas.length === 0) {
+    return parent;
+  }
+
   let loader = loaders.get(parent);
   if (loader === undefined) {
-    loader = new DataLoader(infos => getMergedParentsFromInfos(parent, context, infos));
+    loader = new DataLoader(infos =>
+      getMergedParentsFromInfos(parent, context, infos, mergedTypeInfo, sourceSubschema)
+    );
     loaders.set(parent, loader);
   }
   return loader.load(info);
@@ -82,15 +84,10 @@ export async function getMergedParent(
 async function getMergedParentsFromInfos(
   parent: ExternalObject,
   context: Record<string, any>,
-  infos: ReadonlyArray<GraphQLResolveInfo>
+  infos: ReadonlyArray<GraphQLResolveInfo>,
+  mergedTypeInfo: MergedTypeInfo,
+  sourceSubschema: Subschema
 ): Promise<Array<Promise<ExternalObject>>> {
-  const mergeDetails = getMergeDetails(infos[0], parent);
-  if (!mergeDetails) {
-    return Array(infos.length).fill(parent);
-  }
-
-  const { mergedTypeInfo, sourceSubschema } = mergeDetails;
-
   const { requiredKeys, delegationMaps, stageMap } = buildDelegationPlan(
     mergedTypeInfo,
     infos[0].schema,
