@@ -158,14 +158,19 @@ export class GitLoader implements Loader<GitLoaderOptions> {
     const finalResult: Source[] = [];
     const errors: Error[] = [];
 
+    console.log(`load called for pointer: ${pointer}`);
+
     try {
       if (isGlob(path)) {
         const resolvedPaths = await this.resolveGlobs(pointer, asArray(options.ignore || []));
+        console.log(`resolved glob ${pointer} into paths ${resolvedPaths.join(',')}`);
 
         await Promise.all(
           resolvedPaths.map(async path => {
+            console.log(`attempting to resolve ${path}`);
             const results = await this.load(path, options);
             results?.forEach(result => finalResult.push(result));
+            console.log(`successfully loaded path ${path}`);
           })
         );
       } else if (await this.canLoad(pointer)) {
